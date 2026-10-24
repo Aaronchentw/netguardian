@@ -1,80 +1,95 @@
 # NetGuardian
 
-Offline network telemetry triage prototype for ASUS UGen AI League, Workplace AI / Battlefield Lightning.
+An offline network telemetry triage prototype for ASUS UGen AI League, **Workplace AI / Battlefield Lightning**, with proposed ASUS UGen300 USB integration.
 
-## Run
+- Participant: 陳睿綸 / b13902029
+- [Demonstration video (2 min 44 sec)](https://youtu.be/aZerxq6j_RI)
 
-Requires Python 3.10+; the analysis pipeline uses only the standard library. The optional desktop launcher also needs Tkinter and a local browser.
+## Requirements
+
+- Python 3.10 or newer. Analysis and tests use only the Python standard library; no `pip install` step is needed.
+- The optional desktop GUI requires Tkinter and a browser. Check Tkinter with `python -m tkinter`. If it is missing, install the Tkinter component for your Python distribution; the command-line analyzer still works without it.
+- `Start_NetGuardian.cmd` is a Windows convenience launcher and requires `python` on PATH. Other operating systems can use the Python commands directly.
+
+## Run from a fresh download
+
+Download the repository ZIP and extract it. Open a terminal **inside the extracted folder containing `netguardian.py`**. Its name may be `netguardian-main`.
 
 ```powershell
-cd NetGuardian
-python make_data.py
 python netguardian.py
+```
+
+The included data is ready to use. Expected result: **60 windows analyzed, 30 flagged**. Open `output/report.html` to read the findings; the program also saves `results.json`, `summary.json` and `baseline.json` in `output/`.
+
+To open the desktop interface:
+
+```powershell
 python netguardian.py --gui
+```
+
+Click **Run synthetic demo**, or click **Import telemetry CSV** and select `data/demo.csv`. The GUI requests that the generated report be opened in your configured browser. If it does not open automatically, open `output/report.html` manually. Each run replaces the files in the selected output folder.
+
+## Reproduce data and tests
+
+```powershell
+python make_data.py
 python -m unittest -v
 ```
 
-Open `output/report.html` for the local report. Results, the learned profile and synthetic evaluation metrics are also saved as JSON in `output/`.
+`make_data.py` deterministically regenerates and overwrites the two bundled synthetic CSVs. Five tests cover held-out scenarios, independence from evaluation labels, zero counts and unmatched anomalies, malformed counts, and HTML escaping.
 
-For your own data:
+## Analyze your own telemetry
 
 ```powershell
 python netguardian.py --train your_normal_windows.csv --input your_windows.csv --output your_results
 ```
 
-Use representative **known-normal** training windows; the bundled baseline describes generated fixtures, not your network. Do not train on an unknown mix of attacks and normal traffic. The prototype has no per-host baselines or automatic threshold calibration.
+Select representative **known-normal** training windows. The bundled training profile describes generated fixtures, not your network. The GUI uses the bundled training file; use the CLI `--train` option to select a different baseline. This version has no per-host baselines or automatic threshold calibration.
 
-## Input contract
+## CSV contract
 
-One row represents one host over one **60-second** window. Required CSV fields:
+One row represents one host over a **60-second** window.
 
 | Field | Meaning |
 |---|---|
-| timestamp | Nonempty window timestamp, conventionally ISO 8601 |
-| host | Nonempty operator-chosen host identifier |
-| bytes_out | Outbound bytes in the window |
-| dns_queries | DNS query count |
-| dns_failures | Failed queries, at most dns_queries |
-| distinct_ports | Number of distinct destination ports |
-| syn_packets | Initial TCP SYNs observed in the window |
-| synack_packets | Matching SYN-ACKs for those SYNs, at most syn_packets |
-| label | Optional evaluation-only label: normal, dns, scan, upload |
+| `timestamp` | Nonempty window timestamp, conventionally ISO 8601 |
+| `host` | Nonempty host identifier |
+| `bytes_out` | Outbound bytes |
+| `dns_queries` | DNS query count |
+| `dns_failures` | Failed queries, at most `dns_queries` |
+| `distinct_ports` | Number of distinct destination ports |
+| `syn_packets` | Initial TCP SYNs |
+| `synack_packets` | Matching SYN-ACKs for those SYNs, at most `syn_packets` |
+| `label` | Optional evaluation-only label: `normal`, `dns`, `scan`, `upload` |
 
-All numeric fields must be finite nonnegative integers. An upstream collector must match responses to requests and choose consistent window boundaries. This prototype does not collect, parse or validate packets, or verify the 60-second duration. Delayed DNS/TCP responses may cross windows and distort ratios. Labels never enter feature extraction, training or scoring; `evaluate` uses recognized labels only.
+All numeric fields must be finite nonnegative integers. An upstream collector must match responses to requests and establish consistent windows. This prototype does not capture packets, aggregate flows, verify timestamp format or verify window duration. Responses across window boundaries may distort ratios. Labels are used only for evaluation, never for scoring.
 
-## Model and limits
+## Model and limitations
 
-The model learns mean and sample standard deviation for log(1 + outbound bytes), DNS failure ratio, destination-port count and unmatched-SYN ratio. Floors on standard deviations are 0.2, 0.03, 2.0 and 0.04. The score is the largest positive standardized deviation; the fixed review threshold is 4. Negative deviations and correlations are not modeled. This is a simple one-class statistical baseline, not a trained neural network or comprehensive intrusion detector.
+The statistical baseline learns means and sample standard deviations for log(1 + outbound bytes), DNS failure ratio, destination-port count, and unmatched-SYN ratio. Standard deviation floors are 0.2, 0.03, 2.0 and 0.04. The score is the largest positive standardized deviation; a score of at least 4 is flagged for review. It is not an attack probability. Negative deviations and feature correlations are not modeled.
 
-Diagnostic templates inspect DNS failure, scan-like and volume patterns. An explanation suggests checks and benign alternatives; it does not establish malicious intent. No commands are executed, no hosts are blocked, and no network calls occur in analysis. The optional GUI opens a static report with the user's configured browser.
+Diagnostic templates suggest checks and benign alternatives for DNS failure, scan-like behavior and unusual uploads. No commands are executed and no hosts are blocked. Analysis makes no cloud API calls. Reports and JSON findings remain on the local filesystem.
 
-The bundled data has 120 synthetic training windows and 60 separately seeded test windows. Its three anomaly groups are deliberately separable. TP=30, FP=0, FN=0, TN=30 on these fixtures establishes expected pipeline behavior only. It does not establish real-world precision, recall or security effectiveness. Five automated tests cover expected scenarios, label independence, zero counts/unmatched anomalies, invalid counts and HTML escaping.
+The 120 training windows and 60 separately seeded test windows are synthetic. The deliberately separated test set yields TP=30, FP=0, FN=0 and TN=30. These results demonstrate pipeline behavior and **do not establish real-world accuracy or security effectiveness**.
 
-## UGen300 integration status
+## UGen300 status
 
-**Not implemented or tested on hardware.** Planned Stage II work: a Linux host validates an official supported UGen300 language model, passes minimized structured findings with curated playbook excerpts to local inference, and checks answer structure/evidence references before display. Runtime API availability, model selection, throughput, latency, power and explanation quality remain unverified. If that interface is unavailable, the current template backend remains functional.
-
-Primary references:
+**Hardware integration and language-model inference are not implemented or tested.** Planned work uses a Linux host, a vendor-supported UGen300 model, structured findings and bounded playbook context, with checked answers and a template fallback. Runtime interface availability, model compatibility, latency, power and explanation quality remain unverified.
 
 - [ASUS UGen300 announcement](https://press.asus.com/news/press-releases/asus-ugen300-usb-ai-accelerator-generative-ai-edge/)
-- [Official UGen Utility guide, currently Linux only](https://github.com/Asus-UGen-Series/Ugen-Utility)
+- [Official UGen Utility guide](https://github.com/Asus-UGen-Series/Ugen-Utility)
 
-## Submission material
+The demonstration video contains automatically operated real GUI interactions, actual generated reports, synthetic narration and edited explanatory cards. It uses synthetic data and does not show hardware execution.
 
-- `NetGuardian_Proposal.pptx`: editable 16-slide English proposal.
-- `NetGuardian_Proposal_DRAFT.pdf`: PDF draft; participant identity and real links still need completion.
-- `slides.json`: editable slide content; `build_slides.ps1` exports it through installed PowerPoint.
-- `demo_script.md`: under-three-minute narration and scene plan.
-- `NetGuardian_Demo.mp4`: two-minute silent walkthrough using actual generated report screenshots and captions; no hardware execution is shown.
-- `NetGuardian_Demo.pptx` + `build_demo.ps1`: editable walkthrough and video export script.
-- `submission_checklist.md`: remaining steps before actual submission.
+## Repository files
 
-No GitHub repository was published, no YouTube video uploaded, and no competition or course submission performed. Do not submit the draft with placeholder identity or URLs.
-
-After real links and participant details are available, run the following with actual values (installed Microsoft PowerPoint is required for export):
-
-```powershell
-python finalize_proposal.py --name "Your Name" --student-id YOUR_ID --github https://github.com/YOUR_ACCOUNT/YOUR_REPO --youtube https://youtu.be/YOUR_VIDEO_ID
+```text
+netguardian.py            Analysis, reporting and optional GUI
+make_data.py              Reproducible synthetic fixture generator
+test_netguardian.py       Five automated tests
+Start_NetGuardian.cmd     Windows GUI launcher
+data/train_normal.csv     Synthetic training windows
+data/demo.csv             Synthetic demonstration windows
 ```
 
-This rebuilds the deck and creates `{student-id}_CN_league.pdf`. The tool validates URL shape only; open the real links yourself to confirm reviewer access. The demo video is not automatically rebuilt after participant details change.
+The competition proposal PDF, PowerPoint export utilities and video-editing tools are separate submission artifacts and are not included in this repository.
